@@ -1,0 +1,101 @@
+<p align=CENTER> Synopsis</p>
+                                        
+A data analysis was conducted to predict the method of exercise done from a set
+of features recorded from the exercise. A random forest learning algorithm using decision trees was conducted using the train function. The dataset was first prepared by removing variables with a near-zero variance.The dataset was then split into a training set and a validation set to benchmarkthe predictions from the training set against.Afterwards a correlation graph was utilized to determine a cutoff value in order to remove highly correlated variables from the training set. Lastly, the train function was ran and checked against a validation set using a confusion matrix.
+
+To begin,we load the necessary packages and set the seed so that this research is reproducible: 
+
+```{r library,echo=FALSE}
+require(caret)
+library(caret)
+require(corrplot)
+library(corrplot)
+require(doMC)
+library(doMC)
+require(plyr)
+library(plyr)
+set.seed(32857)
+```
+
+Then, it helps to set the options
+```{r options}
+options(scipen=100,digits=3)
+```
+
+After this, we download the testing dataset, import it, and remove all of the identification variables from analysis.
+```{r dataload,cache=TRUE}
+url<- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+download.file(url=url,destfile="pml-training.csv",method="curl")
+pml<- read.csv("pml-training.csv")
+pml2<- pml[,-c(1:7)]
+```
+
+After this, the features of the dataset are narrowed down. We remove the possible predictors with near-zero variance so that they do not have an undue influence on the model. Then, we look at how many missing values the remaining columns have. We see that there are only columns with 0 or 19,216 missing values. Since we cannot impute data when 98% of the column is missing, we remove the predictors that have more than 0 missing values.
+
+```{r cut down,cache=TRUE}
+nearZero<- nearZeroVar(pml2)
+pml3<- pml2[,-c(nearZero)]
+is.na<- as.data.frame(colSums(is.na(pml3))) #only values are 0 and 19216
+names(is.na)<- "missing_values"
+missing<- count(is.na,vars="missing_values")
+print(missing)
+pmlfull<- pml3[,colSums(is.na(pml3))==0]
+```
+
+The next step of writing the machine learning algorithm is to separate our data into a training set and a validation set. From this, we can test multiple algorithms to see which is the most effective at prediction. The three we will test are going to be:Random Forest, Gradient Boosting Machines (using trees) and Support Vector Machines.
+
+```{r split,cache=TRUE}
+inTrain<- createDataPartition(y=pmlfull$classe,p=0.75,list=FALSE)
+pmltr<-pmlfull[inTrain,]
+pmlval<- pmlfull[-inTrain,]
+```
+
+In order to narrow the data set further for computational ease (so my 2012 Macbook Air can run the algorithms in a reasonable time,) we can remove highly correlated variables. To see what would be a good cutoff value for the correlation, a correlation heatmap was generated and a value was chosen that removes the variables in the correlation diagonal, which I appeared to be .75. The heatmap works best if the values are standardized before the correlation matrix is generated.
+
+```{r cut down 2,cache=TRUE}
+pmltr2<- pmltr[,-53]
+pmltr2<- scale(pmltr2,center=TRUE,scale=TRUE)
+cor<- cor(pmltr2)
+corrplot(cor,order="hclust",tl.pos="n")
+takeout<- findCorrelation(cor,cutoff=0.75)
+```
+
+From here, we create our final training set and validation set by removing the variables that correlated above 0.75
+```{r final set}
+pmltrfinal<- pmltr[,-takeout]
+colstouse<- names(pmltrfinal)
+pmlvalfinal<- pmlval[,colstouse]
+```
+
+Finally, we run our training algorithms from the caret package. For the purpose of this assigment, I used the random forest algorithm, which proved to be the most accurate whe For random forest, the out-of-bag error serves the same purpose as cross-validation error(Breiman & Cutler,2004.), which is to estimate the error rate on a new dataset based on taking multiple samples from the initial training dataset. Principal components analysis was used in pre-processing to minimize the amount of variables used to help with computational speed. Tuning parameters were automatically chosen using the train function in caret.
+
+```{r training,cache=TRUE,warning=FALSE}
+rftrain<- train(classe~.,data=pmltrfinal,method="rf",preProcess="pca",
+                           trControl=rfControl)
+```
+
+```{r}
+rftrain
+```
+
+The results are that the random forest had an estimated out-of-bag accuracy of `r rftrain$results[1,2]*100`% with a standard deviation of `r rftrain$results[1,4]*100`%. Overall, the estimate took about 45 minutes on my 2012 Macbook Air.
+
+We can also see if the estimate is accurate by seeing if it can predict the validation set accurately. As we can see, the results are relatively close to the prediction made during training.
+```{r prediction test,echo=FALSE}
+pred<- predict(rftrain,pmlvalfinal)
+confusionMatrix(pred,pmlvalfinal$classe)
+```
+
+Finally, we load the testing set, remove all of the columns that we did not use in our training set and make predictions:
+```{r testing and predictions,cache=TRUE}
+url2<- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+download.file(url=url2,destfile="pml-testing.csv",method="curl")
+pmltest<- read.csv("pml-testing.csv")
+pmltest2<- pmltest[,-c(1:7)]
+colstouse2<- colstouse[-32]
+pmltestfinal<- pmltest2[,colstouse2]
+predicts<- predict(rftrain,pmltestfinal)
+```
+
+<p align=CENTER> Citations</p>
+Breiman,L. & Cutler, M. (2004). <i>Random Forests.</i> Retrieved from: https://www.stat.berkeley.edu/~breiman/RandomForests/cc_home.htm.
